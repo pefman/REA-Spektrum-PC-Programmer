@@ -53,7 +53,6 @@ NAK = 0x15
 BL_RESPONSE_OFFSET = 0x85
 SG3_RESPONSE_OFFSET = 0x80
 
-
 class BlCommand(IntEnum):
     """Bootloader commands (values from the public Saleae decoder)."""
 
@@ -88,6 +87,31 @@ class Sg3Type(IntEnum):
     FORWARD_PROGRAMMING = 0x0B
 
 
+# ---------------------------------------------------------------- safety
+#
+# Everything that modifies the device is blocked by default.  Erasing or
+# rewriting receiver flash can brick a receiver, so those bootloader
+# commands are refused unless the caller explicitly opts in.
+#
+DESTRUCTIVE_COMMANDS = {
+    BlCommand.BIN_ERASE,
+    BlCommand.BIN_WRITE,
+    BlCommand.SAX_ERASE,
+    BlCommand.SAX_WRITE,
+    BlCommand.SAX_EOF,
+    BlCommand.SAX_IX_ERASE,
+    BlCommand.SAX_IX_WRITE,
+}
+
+#: set to True only if you really mean to modify a device
+ALLOW_DESTRUCTIVE = False
+
+
+def set_destructive_allowed(allow: bool) -> None:
+    global ALLOW_DESTRUCTIVE
+    ALLOW_DESTRUCTIVE = allow
+
+
 # ---------------------------------------------------------------- checksum
 
 
@@ -110,7 +134,20 @@ def _append_checksum(buf: bytearray) -> None:
 
 
 def build_bootloader_frame(cmd: int, arg: int = 0x00, payload: bytes = b"") -> bytes:
-    """Build a 0x48 0x48 bootloader frame (verified: 0x42a430)."""
+    """Build a 0x48 0x48 bootloader frame (verified: 0x42a430).
+
+    Commands that erase or write device flash are refused unless
+    `set_destructive_allowed(True)` was called.
+    """
+    try:
+        parsed = BlCommand(cmd)
+    except ValueError:
+        parsed = None
+    if parsed in DESTRUCTIVE_COMMANDS and not ALLOW_DESTRUCTIVE:
+        raise PermissionError(
+            f"{parsed.name} would modify the device (flash erase/write); "
+            f"refused. Call protocol.set_destructive_allowed(True) if that is "
+            f"really what you want.")
     buf = bytearray()
     buf.append(BL_HEADER)
     buf.append(BL_HEADER)

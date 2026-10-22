@@ -75,6 +75,17 @@ def test_parser_roundtrip():
     assert frames[1].payload[:3] == b"\x02\x21\x03"
 
 
+def test_device_hello_capture():
+    """The AR637TA announces itself with [0x01][type][payload] frames."""
+    path = Path(__file__).resolve().parent / "data" / "ar637ta_hello.bin"
+    data = path.read_bytes()
+    assert data[0] == 0x01, "frames start with 0x01"
+    # every frame the receiver sent starts with 0x01
+    assert data.count(b"\x01\x70") == 9, "nine keep-alive frames"
+    assert b"\x01\x68\x80\xc0" in data
+    assert b"\x01\x78" in data
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

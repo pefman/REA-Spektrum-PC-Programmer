@@ -190,6 +190,50 @@ binary contains SAX decryption material:
 The `.sax` firmware files themselves are downloaded from Horizon
 (see §5), so a native port needs the account flow as well.
 
+### 3.6 Live traffic from a real AR637TA (measured)
+
+With the cable and an AR637TA attached, the receiver announces itself
+spontaneously when the cable is (re)connected.  The captured stream
+(`spmlinux/tests/data/ar637ta_hello.bin`, 110 bytes) is:
+
+```
+01 68 80 c0
+01 78 f9 fc f4 00 80 7e fc 00
+01 70            x9      (keep-alive)
+01 78 00 00 00 00
+01 78 00 00 … 04 00 40 00 … 42 00 … 80 00 … 01 00 00 40 00 …
+      22 40 00 00 00 0c 00 e6 61 40 e3 47 01 68 44 e6 ce ed d6 ae
+```
+
+Observations:
+
+* every frame starts with **0x01** — the same start byte the app's frame
+  builder uses (`build_fsk_frame`, 0x42a550);
+* the second byte is a **message type** (0x68, 0x70, 0x78 were seen);
+  0x70 is an empty keep-alive;
+* the app's own frame builder produces
+  `0x01 | type | payload… | crc16 | zero padding (>= 64)`, where the type
+  byte is shifted into position 1 from the payload (0x42a5bf: the
+  `QByteArray::operator[](1) = …` shift);
+* the checksum of the *host* frames is the 0x170-seeded 16 bit sum; the
+  receiver's frames do **not** end in a checksum that matches that
+  algorithm, so the receiver's frames are either checksum-free or use a
+  different scheme — the app's receive path has to be read to settle it.
+
+The complete list of protocol operations the app implements is visible in
+the RTTI of the binary (`DeviceConnection`):
+
+```
+fskDiscoveryRequest  fskIdRequestAsync  fskReadSerialAsync
+fskRead(u16,u16)  fskWrite(u16,QByteArray)
+fskAdvRead(FlashTarget)  fskAdvWrite(FlashTarget)
+fskGetTargetSectionsLimited  fskGetSectionCrcsLimited
+fskGo  fskSave  fskKeepAlive  fskSetTested  fskReadCal
+fskTncStatusAsync  fskTncStart  fskStartSensorTnc  fskReadFaaSerialNumber
+idRequestAsync  sendSaxFile  handleBootloaderPacket  handleFskPacket
+powerOn  powerOff  open  close  pingDevice  switchToMode(DeviceMode)
+```
+
 ---
 
 ## 4. File formats

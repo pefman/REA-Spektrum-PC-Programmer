@@ -151,6 +151,9 @@ if HAVE_QT:
 
         def toggle_connection(self):
             if self.transport is not None:
+                mon = getattr(self, "monitor", None)
+                if mon:
+                    mon.stop()
                 self.transport.close()
                 self.transport = None
                 self.connect_btn.setText("Connect")
@@ -165,16 +168,23 @@ if HAVE_QT:
                                     f"Could not open the cable:\n\n{e}")
                 return
             self.connect_btn.setText("Disconnect")
-            self.status.setText("Cable opened.  The AS3X handshake is not "
-                                 "implemented yet - see REPORT.md.")
+            self.status.setText("Cable opened - listening for the receiver.")
             self.info.setRowCount(4)
             for r, (k, v) in enumerate([
                     ("Transport", "FTDI D2XX (115200 8N1)"),
                     ("Device", self.device_combo.currentText()),
-                    ("Serial number", "read on connect"),
-                    ("Product code", "read on connect")]):
+                    ("Chip", getattr(self.transport, "chip", "?")),
+                    ("Warnings", "; ".join(getattr(self.transport, "warnings", [])) or "-")]):
                 self.info.setItem(r, 0, QTableWidgetItem(k))
                 self.info.setItem(r, 1, QTableWidgetItem(v))
+            self.monitor = transport.FtdiMonitor(
+                self.transport, self._on_data)
+            self.monitor.start()
+
+        def _on_data(self, data: bytes):
+            log = getattr(self, "_log_page", None)
+            if log is not None:
+                log.add_raw("<- device", data)
 
 
     class ModelsPage(QWidget):
@@ -400,6 +410,21 @@ if HAVE_QT:
             clear.clicked.connect(lambda: self.table.setRowCount(0))
             lay.addWidget(clear)
 
+        def add_raw(self, direction: str, data: bytes):
+            """Show a raw chunk (the receiver speaks [0x01][type][payload])."""
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            kind = "-"
+            if data and data[0] == 0x01:
+                kind = f"type 0x{data[1]:02X}" if len(data) > 1 else "?"
+            self.table.setItem(r, 0, QTableWidgetItem(
+                __import__("time").strftime("%H:%M:%S")))
+            self.table.setItem(r, 1, QTableWidgetItem(direction))
+            self.table.setItem(r, 2, QTableWidgetItem(kind))
+            self.table.setItem(r, 3, QTableWidgetItem(""))
+            self.table.setItem(r, 4, QTableWidgetItem(data.hex(" ")))
+            self.table.scrollToBottom()
+
         def add_frame(self, direction: str, frame):
             r = self.table.rowCount()
             self.table.insertRow(r)
@@ -470,6 +495,7 @@ if HAVE_QT:
             self.setCentralWidget(central)
 
             self.models.open_requested.connect(self._open_model)
+            self.dashboard._log_page = self.log
 
             bar = QHBoxLayout()
             self.status_label = QLabel("Ready")

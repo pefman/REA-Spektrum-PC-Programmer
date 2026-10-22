@@ -51,9 +51,14 @@ FT_VENDOR_READ = 0x40
 FT_SET_FLOW_CTRL = 0x02
 FT_SET_BAUDRATE = 0x03
 FT_SET_LINE_CTL = 0x04        # "set data characteristics" in FTDI's numbering
+FT_MODEM_CTRL = 0x01          # DTR / RTS
+FT_POLL_MODEM_STATUS = 0x05
 FT_SET_LATENCY = 0x09
 FT_SET_BITMODE = 0x0B
 FT_READ_EEPROM = 0x90
+
+FT_DTR = 0x01
+FT_RTS = 0x02
 
 FTDI_EP_OUT = 0x02
 FTDI_EP_IN = 0x81
@@ -158,6 +163,49 @@ def _usb():
     return usb
 
 
+class FtdiMonitor:
+    """Background reader that hands received frames to a callback.
+
+    The programming cable is a single wire link, so everything the host
+    sends is echoed back; the monitor therefore reports the raw stream and
+    the caller decides what to do with it.
+    """
+
+    def __init__(self, transport, callback, interval: float = 0.05):
+        self.transport = transport
+        self.callback = callback
+        self.interval = interval
+        self._thread = None
+        self._stop = False
+
+    def start(self):
+        import threading
+        self._stop = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop = True
+
+    def _run(self):
+        while not self._stop:
+            try:
+                data = self.transport.read(4096, timeout=200)
+            except Exception:
+                break
+            if not data:
+                continue
+            # the FTDI prefixes every USB packet with two status bytes
+            if len(data) >= 2 and data[0] in (0x00, 0x01, 0x30, 0x31) and \
+                    data[1] in (0x60, 0x00, 0x40, 0x41):
+                data = data[2:]
+            if data:
+                try:
+                    self.callback(data)
+                except Exception:
+                    pass
+
+
 def list_ftdi_devices(vid: int = FTDI_VID, pid: int | None = None) -> list:
     usb = _usb()
     out = []
@@ -202,6 +250,8 @@ class FtdiTransport:
         self.vid, self.pid = vid, pid
         self.warnings: list[str] = []
         self.baudrate = baudrate
+        self.dtr = False
+        self.rts = False
         bcd = getattr(self.dev, "bcdDevice", 0)
         self.chip = (CHIP_230X if bcd == 0x1000 else
                      CHIP_230X2 if bcd == 0x1001 else CHIP_BM)
@@ -296,6 +346,22 @@ class FtdiTransport:
             if getattr(e, "errno", None) in (110, 7) or "timed out" in str(e).lower():
                 return b""
             raise TransportError(f"FTDI read failed: {e}") from None
+
+    def set_modem_control(self, dtr: bool = False, rts: bool = False) -> None:
+        """Set the DTR / RTS output lines (SIO_MODEM_CTRL = 0x01).
+
+        The Spektrum programming cable switches the 5 V that it feeds to
+        the receiver's servo connector with one of these lines, so this
+        is how the receiver is powered from the PC.
+        """
+        value = (FT_DTR if dtr else 0) | (FT_RTS if rts else 0)
+        self._ctl(FT_MODEM_CTRL, value)
+        self.dtr, self.rts = dtr, rts
+
+    def modem_status(self) -> int:
+        """Read the modem status lines (CTS/DSR/RI)."""
+        data = bytes(self.dev.ctrl_transfer(0xC0, FT_POLL_MODEM_STATUS, 0, 0, 2, 1000))
+        return data[0] if data else 0
 
     def read_eeprom(self, length: int = 0x80) -> bytes:
         """Read the FTDI EEPROM (SIO_READ_EEPROM_REQUEST = 0x90)."""
