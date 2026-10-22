@@ -1,0 +1,27 @@
+# --- proprietary vendor artefacts (never commit these) -------------------
+/nsis_extract/
+/spektrum-programmer-3.10.6.0.exe
+/spektrum_programmer.html
+/7zz
+/7zzs
+/7zz.tar.xz
+License.txt
+History.txt
+MANUAL/
+readme.txt
+
+# --- build artefacts -----------------------------------------------------
+/dist/
+/packaging/arch/dist/
+/packaging/arch/*/src/
+/packaging/arch/*/pkg/
+/packaging/arch/*/*.tar.gz
+/packaging/arch/*/*.pkg.tar.zst
+/packaging/arch/*/.SRCINFO
+build/
+*.egg-info/
+
+# --- python --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/

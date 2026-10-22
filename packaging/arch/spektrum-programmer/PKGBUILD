@@ -1,0 +1,102 @@
+# Maintainer: spmlinux contributors
+#
+# Runs Horizon's official (Windows) Spektrum Programmer under Wine.
+# This is a stop gap while the native port (pkgname=spmlinux) is being
+# finished: the GUI, model editors and firmware updates all work, but the
+# FTDI D2XX layer needs a stand-in (see the package README).
+#
+# NOTE: the payload is Horizon Hobby / Mattel proprietary software and is
+# packaged here only for local use.  Do not redistribute the built package.
+pkgname=spektrum-programmer
+pkgver=3.10.6.0
+pkgrel=1
+pkgdesc="Spektrum Programmer (Horizon Hobby) running under Wine on Linux"
+arch=('x86_64')
+url="https://spektrumrc.cachefly.net/apps/spektrum_programmer.html"
+license=('custom: proprietary - Horizon Hobby, for local use only')
+depends=('wine')
+optdepends=(
+    'libftd2xx: FTDI D2XX library needed by the wineftd2xx stand-in for the programming cable'
+    'mingw-w64-gcc: build the ftd2xx.dll.so stand-in that bridges Wine to libftd2xx'
+)
+source=("spektrum-programmer-$pkgver.tar.gz")
+sha256sums=('SKIP')
+options=('!strip' '!debug')
+
+package() {
+    install -d "$pkgdir/opt/spektrum-programmer"
+    cp -a "$srcdir/spektrum-programmer-$pkgver/." "$pkgdir/opt/spektrum-programmer/"
+
+    install -d "$pkgdir/usr/bin"
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/spektrum-programmer" <<'EOF'
+#!/bin/sh
+# Launch the (Windows) Spektrum Programmer under Wine.
+#
+# QT_OPENGL=software is required: with hardware OpenGL the 32-bit Qt5
+# build dies with an unhandled exception (0xc0000409) during start-up.
+set -e
+APPDIR=/opt/spektrum-programmer
+PREFIX="${SPM_WINE_PREFIX:-$HOME/.local/share/spektrum-programmer/wineprefix}"
+
+if [ ! -d "$PREFIX" ]; then
+    echo "Creating wine prefix in $PREFIX ..."
+    WINEPREFIX="$PREFIX" wineboot -u >/dev/null 2>&1 || true
+fi
+
+exec env WINEPREFIX="$PREFIX" QT_OPENGL=software \
+    wine "$APPDIR/SpmProgrammer.exe" "$@"
+EOF
+
+    install -d "$pkgdir/usr/share/applications"
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/spektrum-programmer.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Spektrum Programmer
+Comment=Configure and update Spektrum receivers and transmitters
+Exec=spektrum-programmer
+Icon=spektrum-programmer
+Terminal=false
+Categories=Utility;Electronics;
+EOF
+
+    install -d "$pkgdir/usr/share/icons/hicolor/256x256/apps"
+    install -Dm644 "$srcdir/spektrum-programmer-$pkgver/Images/Icon-Spektrum.ico" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/spektrum-programmer.ico"
+
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/doc/$pkgname/README.md" <<'EOF'
+# spektrum-programmer (Wine)
+
+Horizon Hobby's Windows *Spektrum Programmer* 3.10.6.0 running under Wine.
+
+    spektrum-programmer          # launch (creates a wine prefix on first run)
+
+The GUI, the model editors, the account login and the firmware update all
+work.  The launcher sets `QT_OPENGL=software`, because the 32-bit Qt5
+build otherwise dies with an unhandled exception (0xc0000409) as soon as
+it touches hardware OpenGL.
+
+The **USB programming cable does not work out of the box**: the app talks
+to the cable through FTDI's proprietary D2XX API (`ftd2xx.dll` +
+`ftdibus.sys`), which Wine cannot provide.
+
+## Making the cable work
+
+1. Install the FTDI Linux D2XX library (or the open source libftd2xx).
+2. Build the `wineftd2xx` stand-in (https://github.com/brentr/wineftd2xx):
+   it provides `ftd2xx.dll.so` for Wine and forwards the D2XX calls to
+   the Linux library.
+3. Copy `ftd2xx.dll.so` over the copy in the wine prefix:
+   `~/.local/share/spektrum-programmer/wineprefix/drive_c/windows/system32/`
+4. Tell the stand-in which device to use and start the app with it:
+
+       FTDID=0403:7C48 spektrum-programmer
+
+   (`0403:7C48` is the Spektrum SPMA3065 cable; any FTDI device works.)
+
+If you only want the model files and the protocol work, use the native
+package `spmlinux` instead - no Wine, no driver.
+
+This package contains proprietary Horizon Hobby software; it is meant for
+local use only and must not be redistributed.
+EOF
+}

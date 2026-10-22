@@ -1,0 +1,3 @@
+# runtime dependencies of the native port
+pyusb>=1.2      # FTDI cable access (talks to libusb-1.0)
+pyserial>=3.5   # optional: CDC / USB-TTL cable transport

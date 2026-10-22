@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spmlinux"
+version = "0.1.0"
+description = "Native Linux port of the Spektrum Programmer: AS3X/FSK device protocol and .srm model files"
+readme = "spmlinux/README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "spmlinux contributors" }]
+keywords = ["spektrum", "as3x", "ftdi", "rc", "drones"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications",
+]
+dependencies = [
+    "pyusb>=1.2",
+    "pyserial>=3.5",
+]
+
+[project.urls]
+Homepage = "https://spektrumrc.cachefly.net/apps/spektrum_programmer.html"
+
+[project.scripts]
+spm = "spmlinux.cli:main"
+
+[tool.setuptools]
+packages = ["spmlinux", "spmlinux.tests"]
+
+[tool.setuptools.package-data]
+spmlinux = ["defaultmodels/*.srm", "model_memory.schema.txt", "README.md"]

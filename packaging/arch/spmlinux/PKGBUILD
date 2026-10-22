@@ -1,0 +1,53 @@
+# Maintainer: spmlinux contributors
+# Based on the reverse engineering of Spektrum Programmer 3.10.6.0.
+pkgname=spmlinux
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native Linux port of the Spektrum Programmer: AS3X/FSK device protocol and .srm model files"
+arch=('any')
+url="https://spektrumrc.cachefly.net/apps/spektrum_programmer.html"
+license=('GPL3')
+depends=('python' 'python-pyusb' 'python-pyserial' 'libusb')
+optdepends=('python-pyqt6: planned native GUI')
+makedepends=()
+source=("spmlinux-$pkgver.tar.gz")
+sha256sums=('SKIP')
+options=('!strip' '!debug')
+
+build() {
+    cd "$srcdir/spmlinux-$pkgver"
+    # sanity check: the offline test suite must pass before packaging
+    python -m spmlinux.tests.test_offline
+}
+
+check() {
+    cd "$srcdir/spmlinux-$pkgver"
+    python -m spmlinux.tests.test_offline
+}
+
+package() {
+    cd "$srcdir/spmlinux-$pkgver"
+
+    pythondir=$(python -c 'import site; print(site.getsitepackages()[0])')
+    install -d "$pkgdir$pythondir/spmlinux"
+    cp -r spmlinux/*.py "$pkgdir$pythondir/spmlinux/"
+    install -d "$pkgdir$pythondir/spmlinux/tests"
+    cp -r spmlinux/tests/*.py "$pkgdir$pythondir/spmlinux/tests/"
+    install -d "$pkgdir$pythondir/spmlinux/defaultmodels"
+    install -Dm644 spmlinux/defaultmodels/*.srm \
+        "$pkgdir$pythondir/spmlinux/defaultmodels/"
+
+    # data files
+    install -d "$pkgdir/usr/share/$pkgname"
+    install -Dm644 spmlinux/model_memory.schema.txt \
+        "$pkgdir/usr/share/$pkgname/model_memory.schema.txt"
+    install -Dm644 spmlinux/README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 REPORT.md "$pkgdir/usr/share/doc/$pkgname/REPORT.md"
+
+    # console entry point
+    install -d "$pkgdir/usr/bin"
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/spm" <<'EOF'
+#!/bin/sh
+exec python -m spmlinux.cli "$@"
+EOF
+}
