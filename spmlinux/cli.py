@@ -94,6 +94,11 @@ def cmd_defaultmodels(args) -> int:
     return 0
 
 
+def cmd_gui(args) -> int:
+    from .gui import main as gui_main
+    return gui_main([sys.argv[0]])
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="spm", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -119,6 +124,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("defaultmodels", help="convert the shipped .srm defaults")
     p.add_argument("out")
     p.set_defaults(func=cmd_defaultmodels)
+
+    p = sub.add_parser("gui", help="start the native Qt GUI")
+    p.set_defaults(func=cmd_gui)
 
     args = ap.parse_args(argv)
     return args.func(args)

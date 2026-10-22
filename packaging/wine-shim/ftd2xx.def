@@ -1,0 +1,17 @@
+LIBRARY ftd2xx
+EXPORTS
+    ; ordinals of the FTD2XX.dll that ships with Spektrum Programmer
+    FT_Open                    @1
+    FT_Close                   @2
+    FT_Read                    @3
+    FT_Write                   @4
+    FT_SetBaudRate             @7
+    FT_SetDataCharacteristics  @8
+    FT_SetFlowControl          @9
+    FT_GetQueueStatus          @18
+    FT_SetEventNotification    @19
+    FT_OpenEx                  @27
+    FT_SetLatencyTimer         @29
+    FT_SetBitMode              @31
+    FT_CreateDeviceInfoList    @70
+    FT_GetDeviceInfoList       @71

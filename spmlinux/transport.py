@@ -48,13 +48,51 @@ APP_BITMODE = 0x88
 APP_BITMODE_MASK = 0x20
 
 FT_VENDOR_READ = 0x40
+FT_SET_FLOW_CTRL = 0x02
 FT_SET_BAUDRATE = 0x03
-FT_SET_LINE_CTL = 0x09
-FT_SET_BITMODE = 0x0A
-FT_SET_LATENCY = 0x12
+FT_SET_LINE_CTL = 0x04        # "set data characteristics" in FTDI's numbering
+FT_SET_LATENCY = 0x09
+FT_SET_BITMODE = 0x0B
+FT_READ_EEPROM = 0x90
 
 FTDI_EP_OUT = 0x02
 FTDI_EP_IN = 0x81
+
+# chip families, detected from bcdDevice (as libftdi does)
+CHIP_BM = "bm"          # FT232B / FT2232C / FT232R
+CHIP_230X = "230x"      # FT230X  (bcdDevice 0x1000)
+CHIP_230X2 = "230x2"    # FT230X2 (bcdDevice 0x1001)
+
+_FRAC_CODE = (0, 3, 2, 4, 1, 5, 6, 7)
+
+
+def _to_clkbits(baudrate: int, clk: int, clk_div: int) -> tuple[int, int]:
+    """libftdi's ftdi_to_clkbits(): returns (best_baud, encoded_divisor)."""
+    if baudrate >= clk // clk_div:
+        return clk // clk_div, 0
+    if baudrate >= clk // (clk_div + clk_div // 2):
+        return clk // (clk_div + clk_div // 2), 1
+    if baudrate >= clk // (2 * clk_div):
+        return clk // (2 * clk_div), 2
+    divisor = clk * 16 // clk_div // baudrate
+    best_divisor = divisor // 2 + 1 if divisor & 1 else divisor // 2
+    if best_divisor > 0x20000:
+        best_divisor = 0x1FFFF
+    best_baud = clk * 16 // clk_div // best_divisor
+    best_baud = best_baud // 2 + 1 if best_baud & 1 else best_baud // 2
+    return best_baud, (best_divisor >> 3) | (_FRAC_CODE[best_divisor & 0x7] << 14)
+
+
+def convert_baudrate(baudrate: int, chip: str = CHIP_BM) -> tuple[int, int, int]:
+    """libftdi's ftdi_convert_baudrate() -> (actual_baud, value, index)."""
+    if baudrate <= 0:
+        raise TransportError("baud rate must be positive")
+    clk = 48_000_000          # C_CLK
+    if chip in (CHIP_230X, CHIP_230X2):
+        best_baud, encoded = _to_clkbits(baudrate, clk, 16)
+    else:
+        best_baud, encoded = _to_clkbits(baudrate, clk, 16)
+    return best_baud, encoded & 0xFFFF, (encoded >> 16) & 0xFFFF
 
 
 class TransportError(RuntimeError):
@@ -162,10 +200,18 @@ class FtdiTransport:
             raise TransportError(f"device index {index} out of range")
         self.dev = devices[index]
         self.vid, self.pid = vid, pid
+        self.warnings: list[str] = []
+        self.baudrate = baudrate
+        bcd = getattr(self.dev, "bcdDevice", 0)
+        self.chip = (CHIP_230X if bcd == 0x1000 else
+                     CHIP_230X2 if bcd == 0x1001 else CHIP_BM)
         self.dev.set_configuration()          # may raise if already configured
         self._claim()
         self._set_baudrate(baudrate, baud_divisor)
         self._set_line_property(8, 0, 0)       # 8N1, like the Windows app
+        self._set_flow_control(0)              # no flow control
+        # The Windows app ignores failures of these two, so we do too:
+        # not every FTDI chip implements SET_LATENCY / SET_BITMODE.
         self._set_latency(latency_ms)
         if use_bitmode:
             self._set_bitmode(APP_BITMODE, APP_BITMODE_MASK)
@@ -181,35 +227,62 @@ class FtdiTransport:
 
     def _ctl(self, request: int, value: int, index: int = 0, data: bytes = b"") -> None:
         try:
-            self.dev.ctrl_transfer(FT_VENDOR_READ, request, value, index, data or None,
-                                   1000)
+            self.dev.ctrl_transfer(FT_VENDOR_READ, request, value, index,
+                                   data or None, 1000)
         except Exception as e:
+            # a rejected vendor request stalls the control endpoint; clear
+            # the halt so that the device stays usable
+            try:
+                import usb.util
+                usb.util.clear_halt(self.dev, 0)
+            except Exception:
+                pass
             raise TransportError(f"FTDI control request 0x{request:02x} failed: {e}") from None
 
     # -- D2XX-ish primitives -------------------------------------------
     def _set_baudrate(self, baud: int, divisor: int | None = None) -> None:
-        """FT_SET_BAUDRATE with the FT232R/FT230X divisor encoding.
+        """FT_SET_BAUDRATE.
 
-        The 3 MHz base clock gives div = 3_000_000 / baud (115200 -> 26,
-        i.e. ~0.4 % error).  `divisor` can be given explicitly for other
-        chips (FT232H/FT4232 use a different high-speed encoding).
+        The divisor is computed with libftdi's algorithm (the Spektrum
+        cable is an FT230X, so the 48 MHz/16 = 3 MHz base clock applies)
+        and is passed in wValue / wIndex, which is what the chip expects
+        for the "BM" family.  D2XX instead sends a two byte data stage;
+        that variant is tried as a fallback.
         """
         if divisor is None:
-            divisor = 3_000_000 // baud
-        if not 1 <= divisor <= 0x3FFF:
-            raise TransportError(f"baud {baud} out of range for FT232R encoding")
-        data = bytes([divisor & 0xFF, (divisor >> 8) & 0x3F])
-        self._ctl(FT_SET_BAUDRATE, divisor, 0, data)
+            _, value, index = convert_baudrate(baud, self.chip)
+        else:
+            value, index = divisor, 0
+        try:
+            self._ctl(FT_SET_BAUDRATE, value, index)
+        except TransportError:
+            self._ctl(FT_SET_BAUDRATE, value, index,
+                      bytes([value & 0xFF, (value >> 8) & 0xFF]))
+        self.baudrate = baud
 
     def _set_line_property(self, bits: int, parity: int, stop: int) -> None:
         value = (bits & 0xF) | ((parity & 0xF) << 8) | ((stop & 0x3) << 11)
         self._ctl(FT_SET_LINE_CTL, value)
 
+    def _set_flow_control(self, mode: int) -> None:
+        self._ctl(FT_SET_FLOW_CTRL, mode)
+
     def _set_latency(self, ms: int) -> None:
-        self._ctl(FT_SET_LATENCY, ms)
+        # the FT230X has a fixed latency timer; the request is not
+        # supported there and stalls the endpoint, so skip it
+        if self.chip in (CHIP_230X, CHIP_230X2):
+            self.warnings.append("latency timer is fixed on this chip, skipped")
+            return
+        try:
+            self._ctl(FT_SET_LATENCY, ms)
+        except TransportError as e:
+            self.warnings.append(str(e))
 
     def _set_bitmode(self, mode: int, mask: int) -> None:
-        self._ctl(FT_SET_BITMODE, mode, mask)
+        try:
+            self._ctl(FT_SET_BITMODE, mode, mask)
+        except TransportError as e:
+            self.warnings.append(str(e))
 
     # -- IO -------------------------------------------------------------
     def write(self, data: bytes) -> int:
@@ -218,14 +291,25 @@ class FtdiTransport:
     def read(self, size: int = 4096, timeout: int = 1000) -> bytes:
         import usb.core
         try:
-            return bytes(self.dev.read(FTDI_EP_IN, size, timeout))
+            return bytes(self.dev.read(FTDI_EP_IN, size, int(timeout)))
         except usb.core.USBError as e:
             if getattr(e, "errno", None) in (110, 7) or "timed out" in str(e).lower():
                 return b""
             raise TransportError(f"FTDI read failed: {e}") from None
 
+    def read_eeprom(self, length: int = 0x80) -> bytes:
+        """Read the FTDI EEPROM (SIO_READ_EEPROM_REQUEST = 0x90)."""
+        out = bytearray()
+        for addr in range(0, length, 2):
+            data = bytes(self.dev.ctrl_transfer(0xC0, FT_READ_EEPROM, 0, addr, 2, 1000))
+            if len(data) != 2:
+                raise TransportError(f"EEPROM read failed at {addr:#x}")
+            out += data
+        return bytes(out)
+
     def close(self) -> None:
         try:
+            import usb.util
             usb.util.dispose_resources(self.dev)
         except Exception:
             pass

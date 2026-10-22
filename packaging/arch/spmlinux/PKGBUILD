@@ -8,7 +8,7 @@ arch=('any')
 url="https://spektrumrc.cachefly.net/apps/spektrum_programmer.html"
 license=('GPL3')
 depends=('python' 'python-pyusb' 'python-pyserial' 'libusb')
-optdepends=('python-pyqt6: planned native GUI')
+optdepends=('pyside6: native Qt GUI (spm gui)')
 makedepends=()
 source=("spmlinux-$pkgver.tar.gz")
 sha256sums=('SKIP')
@@ -50,4 +50,24 @@ package() {
 #!/bin/sh
 exec python -m spmlinux.cli "$@"
 EOF
+
+    # native GUI
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/spm-gui" <<'EOF'
+#!/bin/sh
+exec python -m spmlinux.cli gui "$@"
+EOF
+    install -d "$pkgdir/usr/share/applications"
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/spmlinux.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Spektrum Programmer (native)
+Comment=Native Linux port of the Spektrum Programmer
+Exec=spm-gui
+Terminal=false
+Categories=Utility;Electronics;
+EOF
+
+    # udev rule so the programming cable can be opened without root
+    install -Dm644 "$srcdir/spmlinux-$pkgver/udev/99-spektrum-ftdi.rules" \
+        "$pkgdir/usr/lib/udev/rules.d/99-spektrum-ftdi.rules"
 }

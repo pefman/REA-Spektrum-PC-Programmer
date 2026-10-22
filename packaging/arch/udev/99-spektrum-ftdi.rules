@@ -1,0 +1,13 @@
+# Spektrum programming cable (FTDI 0403:7c48, "USB Interface AS3X Programmer")
+#
+# The stock FTDI rules in most distributions only cover the common FTDI
+# product IDs, so the Spektrum cable ends up as root:root 0664 and can
+# neither be opened nor claimed by libusb.  This rule makes the node
+# writable and adds a seat ACL so a logged-in desktop user can use it
+# without being root.
+#
+#   sudo install -m644 99-spektrum-ftdi.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="7c48", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6001", MODE="0666", TAG+="uaccess"

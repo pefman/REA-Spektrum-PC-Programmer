@@ -20,6 +20,9 @@ cp -r "$ROOT/spmlinux" "$OUT/stage/spmlinux-$VERSION_PKG/spmlinux"
 rm -rf "$OUT/stage/spmlinux-$VERSION_PKG/spmlinux/__pycache__" \
        "$OUT/stage/spmlinux-$VERSION_PKG/spmlinux/tests/__pycache__"
 cp "$ROOT/REPORT.md" "$OUT/stage/spmlinux-$VERSION_PKG/REPORT.md"
+mkdir -p "$OUT/stage/spmlinux-$VERSION_PKG/udev"
+cp "$ROOT/packaging/arch/udev/99-spektrum-ftdi.rules" \
+   "$OUT/stage/spmlinux-$VERSION_PKG/udev/"
 tar -C "$OUT/stage" -czf "$OUT/spmlinux-$VERSION_PKG.tar.gz" "spmlinux-$VERSION_PKG"
 rm -rf "$OUT/stage"
 
